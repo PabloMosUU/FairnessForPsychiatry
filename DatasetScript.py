@@ -181,7 +181,8 @@ def get_diagnosis_date(row):
         return row.Startdatum
 
 dbc["diagnosis_date"] = dbc.apply(lambda row: get_diagnosis_date(row), 1)
-
+# Uncomment the following line to keep only diagnoses with a DiagnoseDatum
+# dbc = dbc[dbc['DiagnoseDatum'].notnull()].reset_index(drop=True)
 
 # In[ ]:
 
@@ -661,6 +662,8 @@ del Dataset3Days["DoseDiazepam"]
 
 # In[ ]:
 
-
-Dataset14Days.to_csv(DATA_DIR + 'Dataset14Days.csv', sep=';', index=False)
+if SAVE_OUTPUT:
+    Dataset14Days.to_csv(DATA_DIR + 'Dataset14Days.csv',
+                         sep=';',
+                         index=False)
 
