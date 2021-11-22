@@ -40,6 +40,8 @@ violent_columns = ["PseudoID", "hantering_datum", "begin_incident"]
 
 patient_columns = ["PseudoID", "Leeftijd_startdatum_dossier" ]
 
+def drop_by_pseudo_id(df: pd.DataFrame, pseudo_ids: list) -> pd.DataFrame:
+    return df[df['PseudoID'].apply(lambda x: x not in pseudo_ids)].reset_index()
 
 # # Load the original datasets
 
@@ -266,6 +268,9 @@ administering = administering[administering["ATC_code_omschr"].isin(tranq_diazep
 
 
 # 1 administering does not contain a toediendatum and toedientijd (corrupted data)
+administering_drop_patients = []
+# Uncomment the following line to remove that patient
+# administering_drop_patients = administering[administering['ToedienDatum'].isnull()]['PseudoID'].tolist()
 administering = administering.dropna(subset=["ToedienDatum"])
 
 
@@ -655,6 +660,14 @@ Dataset3Days = get_adm_dbc(3 , adm_dbc3)
 
 del Dataset3Days["DoseDiazepam"]
 
+if len(administering_drop_patients) != 0:
+    DatasetWhole = drop_by_pseudo_id(DatasetWhole,
+                                      administering_drop_patients)
+    Dataset14Days = drop_by_pseudo_id(Dataset14Days,
+                                       administering_drop_patients)
+    Dataset3Days = drop_by_pseudo_id(Dataset3Days,
+                                      administering_drop_patients)
+        
 
 # ### Save the dataset
 # 
