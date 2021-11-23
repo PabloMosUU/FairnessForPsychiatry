@@ -587,8 +587,7 @@ var_pat = ["PseudoID",
         "DoseDiazepamPost",   
 ]
 
-# TODO: rename this variable
-UsefullVariables = var_pat + afd + hoofddiagnoses
+UsefulVariables = var_pat + afd + hoofddiagnoses
 
 # left join on PseudoID
 # has no end date restriction for the post prescriptions
@@ -631,7 +630,7 @@ def get_adm_dbc(dataset: int, frame ):
     Dataset.drop(columns=['sum', 'diff', 'avg', 'fracdiff'], inplace=True)
 
     # true dataset 
-    DatasetWhole = Dataset[UsefullVariables]
+    DatasetWhole = Dataset[UsefulVariables]
     
     assert np.sum(DatasetWhole.isnull().sum().values) == 0
     return DatasetWhole
