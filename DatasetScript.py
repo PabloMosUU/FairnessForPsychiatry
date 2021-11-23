@@ -591,8 +591,7 @@ UsefulVariables = var_pat + afd + hoofddiagnoses
 
 # left join on PseudoID
 # has no end date restriction for the post prescriptions
-# TODO: rename this method
-def get_adm_dbc(dataset: int, frame ):
+def get_adm_dose(dataset: int, frame ):
     dataset_end_date_column = {1: 'OntslagdatumTijd', 2: 'DateTimeCheckF', 3: 'DateTimeCheckP'}
     end_date = dataset_end_date_column[dataset]
     adm_adm1 = frame.merge(administering[["PseudoID", "ToedienDatumTijd", "DoseDiazepam" ]], how="left", 
@@ -639,7 +638,7 @@ def get_adm_dbc(dataset: int, frame ):
 # In[ ]:
 
 
-DatasetWhole = get_adm_dbc(1 , adm_dbc1)
+DatasetWhole = get_adm_dose(1 , adm_dbc1)
 
 del DatasetWhole["DoseDiazepamPost"]
 del DatasetWhole["DoseDiazepamPre"]
@@ -648,7 +647,7 @@ del DatasetWhole["DoseDiazepamPre"]
 # In[ ]:
 
 
-Dataset14Days = get_adm_dbc(2 , adm_dbc2)
+Dataset14Days = get_adm_dose(2 , adm_dbc2)
 
 del Dataset14Days["DoseDiazepam"]
 
@@ -656,7 +655,7 @@ del Dataset14Days["DoseDiazepam"]
 # In[ ]:
 
 
-Dataset3Days = get_adm_dbc(3 , adm_dbc3)
+Dataset3Days = get_adm_dose(3 , adm_dbc3)
 
 del Dataset3Days["DoseDiazepam"]
 
