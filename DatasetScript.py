@@ -1,10 +1,4 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# This notebook generates the dataset(s) to be used for classification, starting from the datasets that contain the basic information about patients
-
-# In[ ]:
-
+# This script generates the dataset(s) to be used for classification, starting from the datasets that contain the basic information about patients
 
 import numpy as np
 import pandas as pd
@@ -12,16 +6,10 @@ import datetime
 from sklearn import preprocessing
 
 
-# In[ ]:
-
-
 # data
 DATA_DIR = '/media/bigdata/10. Stages/3. Afgerond/2020-08 Jesse Kuiper/'
 TRANQ_DIAZEPAM_FILE = 'TranquilizerDiazepamFactor.csv'
 SAVE_OUTPUT = False
-
-
-# In[ ]:
 
 
 # selecting usefull var 
@@ -43,17 +31,14 @@ patient_columns = ["PseudoID", "Leeftijd_startdatum_dossier" ]
 def drop_by_pseudo_id(df: pd.DataFrame, pseudo_ids: list) -> pd.DataFrame:
     return df[df['PseudoID'].apply(lambda x: x not in pseudo_ids)].reset_index()
 
+def rel_diff(a: float, b: float) -> float:
+    return abs(a - b) * 2 / (a + b)
+
 # # Load the original datasets
-
-# In[ ]:
-
 
 # load opnamens
 admission = pd.read_csv(DATA_DIR + "werkbestanden-opnames/latest/werkbestand_opnames.csv", sep=';', 
                         usecols=admission_columns)
-
-
-# In[ ]:
 
 
 # load administered
@@ -61,29 +46,17 @@ administering = pd.read_csv(DATA_DIR + "werkbestanden-medicatie/latest/werkbesta
                         decimal=',', usecols=administering_columns)
 
 
-# In[ ]:
-
-
 # load dbc
 dbc = pd.read_csv(DATA_DIR + "werkbestanden-dbc/latest/werkbestand_dbc.csv", sep=';', usecols=dbc_columns)
-
-
-# In[ ]:
 
 
 # load map
 violent = pd.read_csv(DATA_DIR + "werkbestanden-map/latest/werkbestand_map.csv", sep=';', usecols=violent_columns)
 
 
-# In[ ]:
-
-
 #load patient or patient uniek
 patient = pd.read_csv(DATA_DIR + "werkbestanden-patient/latest/werkbestand_patient_uniek.csv", sep=';', 
                   usecols=patient_columns)
-
-
-# In[ ]:
 
 
 # load conversion factors from various tranquilizers to diazepam
@@ -94,29 +67,17 @@ tranq_diazepam = {k:v for k,v in pd.read_csv(TRANQ_DIAZEPAM_FILE, sep=';')[['tra
 
 # ### Admissions
 
-# In[ ]:
-
-
 # remove incomplete admissions 
 admission = admission[admission.OpnamestatusOmschrijving == "Ontslagen"]
-
-
-# In[ ]:
 
 
 # check for na values
 assert admission.isnull().sum().sum() == 0
 
 
-# In[ ]:
-
-
 # change Opnamedatum Ontslagdatum to date times        
 admission["OpnamedatumTijd"] = pd.to_datetime(admission["Opnamedatum"] + ' ' + admission["Opnametijd"])
 admission["OntslagdatumTijd"] = pd.to_datetime(admission["Ontslagdatum"] + ' ' + admission["Ontslagtijd"])
-
-
-# In[ ]:
 
 
 # DateTime checks for the agression and the dbc
@@ -136,22 +97,13 @@ adm_afd = pd.get_dummies(admission["AfdelingOmschrijving"])
 adm_afd_sel = pd.concat([admission, adm_afd[afd]], axis=1)
 
 
-# In[ ]:
-
-
 del adm_afd_sel["AfdelingOmschrijving"]
-
-
-# In[ ]:
 
 
 # create admission1 - 8663, admission2 - 3192 and admission3 - 4685
 admission1 = adm_afd_sel.copy()
 admission2 = adm_afd_sel[admission["Duur"]> 14].reset_index().copy()
 admission3 = adm_afd_sel[admission["Duur"]> 3].reset_index().copy()
-
-
-# In[ ]:
 
 
 print('All discharged admissions from the four nursing wards:', len(admission1))
@@ -161,15 +113,9 @@ print('Only admissions lasting 14 or more days:', len(admission2))
 
 # ### Diagnoses
 
-# In[ ]:
-
-
 # change NaN in hoofddiagnose_groep to "Lege hoofddiagnose" as this is already a variable in the table with the same meaning
 dbc["hoofddiagnose_groep"] = dbc["hoofddiagnose_groep"].replace(np.nan, "Lege hoofddiagnose", regex=True)
 dbc["hoofddiagnose_groep"] = dbc["hoofddiagnose_groep"].str.replace("Bijkomende codes/geen diagnose","Lege hoofddiagnose")
-
-
-# In[ ]:
 
 
 # create a diagnose date
@@ -186,20 +132,11 @@ dbc["diagnosis_date"] = dbc.apply(lambda row: get_diagnosis_date(row), 1)
 # Uncomment the following line to keep only diagnoses with a DiagnoseDatum
 # dbc = dbc[dbc['DiagnoseDatum'].notnull()].reset_index(drop=True)
 
-# In[ ]:
-
-
 dbc.drop(columns=['DiagnoseDatum', 'Einddatum', 'Startdatum'], inplace=True)
-
-
-# In[ ]:
 
 
 # Drop rows that do not have a PseudoID, as there is no way to couple them with admissions
 dbc = dbc[dbc['PseudoID'].notnull()].reset_index(drop=True)
-
-
-# In[ ]:
 
 
 assert dbc.isnull().sum().sum() == 0
@@ -207,21 +144,12 @@ assert dbc.isnull().sum().sum() == 0
 
 # ### Violence incidents
 
-# In[ ]:
-
-
 # Drop rows that do not have a PseudoID, as there is no way to couple them with admissions
 violent = violent[violent['PseudoID'].notnull()].reset_index(drop=True)
 
 
-# In[ ]:
-
-
 # change hantering_datum to date time with begin_incident
 violent["hantering_datumTijd"] = pd.to_datetime(violent["hantering_datum"] + ' ' + violent["begin_incident"])
-
-
-# In[ ]:
 
 
 assert violent.isnull().sum().sum() == 0
@@ -229,20 +157,11 @@ assert violent.isnull().sum().sum() == 0
 
 # ### Patient
 
-# In[ ]:
-
-
 # Select only patients for which we also have admissions
 patient = admission[['PseudoID']].merge(patient, on='PseudoID', how='left').drop_duplicates()
 
 
-# In[ ]:
-
-
 assert len(patient) == admission['PseudoID'].nunique()
-
-
-# In[ ]:
 
 
 assert patient.isnull().sum().sum() == 0
@@ -250,21 +169,12 @@ assert patient.isnull().sum().sum() == 0
 
 # ### Administered medication
 
-# In[ ]:
-
-
 # we are only interested in administered medicine
 administering = administering[administering["Toegediend"]==1]
 
 
-# In[ ]:
-
-
 # list of agreed upon tranquilizers
 administering = administering[administering["ATC_code_omschr"].isin(tranq_diazepam)]
-
-
-# In[ ]:
 
 
 # 1 administering does not contain a toediendatum and toedientijd (corrupted data)
@@ -274,21 +184,12 @@ administering_drop_patients = []
 administering = administering.dropna(subset=["ToedienDatum"])
 
 
-# In[ ]:
-
-
 assert administering.isnull().sum().sum() == 0
-
-
-# In[ ]:
 
 
 # create datetime
 administering["ToedienDatumTijd"] = pd.to_datetime(administering["ToedienDatum"] + ' ' + administering["ToedienTijd"])
 administering.drop(columns=['ToedienDatum', 'ToedienTijd'], inplace=True)
-
-
-# In[ ]:
 
 
 # merge administering
@@ -299,9 +200,6 @@ def InDiazepam(row):
     return tranq_diazepam[omschr] * dosis
 
 
-# In[ ]:
-
-
 administering["DoseDiazepam"] = administering.apply(InDiazepam, axis=1)
 administering.drop(columns=['ATC_code_omschr', 'Dosis'], inplace=True)
 
@@ -310,18 +208,12 @@ administering.drop(columns=['ATC_code_omschr', 'Dosis'], inplace=True)
 
 # ### Patient onto Admissions
 
-# In[ ]:
-
-
 # first add the patient data to the opnamens
 def get_adm_pat(frame: pd.DataFrame) -> pd.DataFrame:
     adm_adm1 = frame.merge(patient, on="PseudoID", how="left")
     assert np.sum(adm_adm1.isnull().sum().values) == 0
     assert len(adm_adm1) == len(frame)
     return adm_adm1    
-
-
-# In[ ]:
 
 
 # merge patient data with admission data
@@ -334,24 +226,15 @@ adm_pat3 = get_adm_pat(admission3)
 
 # ### Violence incidents onto Admissions
 
-# In[ ]:
-
-
 # merge violence data, this is where the datasets start to differ (time period where you count violence incidents)
 # give violence data an unique identifier
 violent["IncidentID"] = np.arange(len(violent))
-
-
-# In[ ]:
 
 
 # merge dataset with mapdata
 map_adm1 = adm_pat1.merge(violent[["PseudoID", "IncidentID", "hantering_datumTijd"]], how="left", on="PseudoID")
 map_adm2 = adm_pat2.merge(violent[["PseudoID", "IncidentID", "hantering_datumTijd"]], how="left", on="PseudoID")
 map_adm3 = adm_pat3.merge(violent[["PseudoID", "IncidentID", "hantering_datumTijd"]], how="left", on="PseudoID")
-
-
-# In[ ]:
 
 
 # whole dataset
@@ -381,9 +264,6 @@ assert len(admission_incidents) == len(adm_pat1)
 # Merge the incidents-counts dataframe onto opnames
 adm_map1 = adm_pat1.merge(admission_incidents, on="OpnameID", how="inner")
 assert len(adm_map1) == len(adm_pat1)
-
-
-# In[ ]:
 
 
 #  dataset2 
@@ -417,9 +297,6 @@ adm_map2 = adm_pat2.merge(admission_incidents, on="OpnameID", how="inner")
 assert len(adm_map2) == len(adm_pat2)
 
 
-# In[ ]:
-
-
 #  dataset3 
 opname_ids, incidents_during_admission, incidents_before_admission = [], [], []
 for opname_id, grp in map_adm3.groupby("OpnameID"):
@@ -450,9 +327,6 @@ assert len(adm_map3) == len(adm_pat3)
 
 
 # ### DBC onto Admissions
-
-# In[ ]:
-
 
 #function to merge adm_dbc with the right dbc
 
@@ -541,21 +415,12 @@ def get_adm_dbc(dataset: int, frame: pd.DataFrame) -> pd.DataFrame:
     return adm_dbc
 
 
-# In[ ]:
-
-
 # merge dbc based on date contraints with adm_map1
 adm_dbc1 = get_adm_dbc(1,adm_map1)
 
 
-# In[ ]:
-
-
 # merge dbc based on date contraints with adm_map2
 adm_dbc2 = get_adm_dbc(2,adm_map2)
-
-
-# In[ ]:
 
 
 # merge dbc based on date contraints with adm_map3
@@ -563,9 +428,6 @@ adm_dbc3 = get_adm_dbc(3,adm_map3)
 
 
 # ### Administered medication onto Admissions
-
-# In[ ]:
-
 
 # create past and future tranq prescriptions
 
@@ -635,24 +497,15 @@ def get_adm_dose(dataset: int, frame ):
     return DatasetWhole
 
 
-# In[ ]:
-
-
 DatasetWhole = get_adm_dose(1 , adm_dbc1)
 
 del DatasetWhole["DoseDiazepamPost"]
 del DatasetWhole["DoseDiazepamPre"]
 
 
-# In[ ]:
-
-
 Dataset14Days = get_adm_dose(2 , adm_dbc2)
 
 del Dataset14Days["DoseDiazepam"]
-
-
-# In[ ]:
 
 
 Dataset3Days = get_adm_dose(3 , adm_dbc3)
@@ -672,10 +525,51 @@ if len(administering_drop_patients) != 0:
 # 
 # To avoid overwriting unnecessarily, I included a flag at the beginning of this file
 
-# In[ ]:
-
 if SAVE_OUTPUT:
     Dataset14Days.to_csv(DATA_DIR + 'Dataset14Days.csv',
                          sep=';',
                          index=False)
-
+else:
+    # Check that the new dataset matches the old one
+    Dataset14DaysOld = pd.read_csv(DATA_DIR + 'Dataset14Days.csv', sep=';')
+    assert len(Dataset14DaysOld) == len(Dataset14Days), \
+        'Different numbers of datapoints'
+    new_cols = set([el for el in Dataset14Days.columns])
+    old_cols = set([el for el in Dataset14DaysOld.columns])
+    assert new_cols == old_cols, 'Different column headers'
+    old_dict, new_dict = [{lbl:len(grp) for lbl, grp in df.groupby('PseudoID')}\
+                          for df in (Dataset14DaysOld, Dataset14Days)]
+    assert len(old_dict) == len(new_dict), 'Different numbers of patients'
+    assert old_dict.keys() == new_dict.keys(), 'Different patient IDs'
+    assert len([el for el in old_dict.keys() \
+                if old_dict[el] != new_dict[el]]) == 0, \
+                   'Different numbers of datapoints per patient'
+    uid_cols = ('PseudoID', 'Duur', 'Leeftijd_opname', 'EersteOpname',
+                'Klin.Acuut & Intensieve. Zorg Jeugd', 'DoseDiazepamPre')
+    Dataset14Days['PabloID'] = Dataset14Days.apply(
+        lambda row: '_'.join([str(int(row[el])) for el in uid_cols]), 1
+    )
+    Dataset14DaysOld['PabloID'] = Dataset14DaysOld.apply(
+        lambda row: '_'.join([str(int(row[el])) for el in uid_cols]), 1
+    )
+    assert len(Dataset14Days) == Dataset14Days['PabloID'].nunique(), \
+        'No unique ID in the new dataset'
+    assert len(Dataset14DaysOld) == Dataset14DaysOld['PabloID'].nunique(), \
+        'No unique ID in the old dataset'
+    merged = Dataset14Days.merge(Dataset14DaysOld, on='PabloID', how='outer')
+    assert len(merged) == len(Dataset14Days), \
+        'Unique ID mismatch between new and old dataset'
+    special_columns = ['DoseDiazepamPre', 'DoseDiazepamPost']
+    for col in special_columns:
+        assert len(merged[merged.apply(
+            lambda row: row[col+'_x'] == row[col+'_y'] or \
+            rel_diff(row[col + '_x'], row[col + '_y']) < 0.005,
+            1
+        )]) == len(merged), col + ' differs by more than 0.5%'
+    for col in Dataset14Days.columns:
+        if col in special_columns or col == 'PabloID':
+            continue
+        assert len(merged[merged.apply(
+            lambda row: row[col+'_x'] != row[col+'_y'], 1
+        )]) == 0, col + ' differs'
+    print('The dataset has not changed')
