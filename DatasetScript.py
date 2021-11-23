@@ -399,8 +399,9 @@ for opname_id, grp in map_adm2.groupby("OpnameID"):
     else:
         # At least one incident                                                                                                                                                                                                                                                                                                                                    
         n_during = len(grp[grp.apply(lambda row: row.DateTimeCheckF >= row.hantering_datumTijd >= row.OpnamedatumTijd, 1)])
-        # TODO: the following comparison should be strictly less than
-        n_before = len(grp[grp.apply(lambda row: row.hantering_datumTijd <= row.OpnamedatumTijd, 1)])
+        n_before = len(grp[grp.apply(
+            lambda row: row.hantering_datumTijd < row.OpnamedatumTijd, 1
+        )])
         incidents_during_admission.append(n_during)
         incidents_before_admission.append(n_before)
 
