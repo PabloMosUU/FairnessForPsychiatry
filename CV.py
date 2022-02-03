@@ -201,12 +201,51 @@ def simple_split(data: pd.DataFrame) -> dict:
     assert len(model_metrics) == len(MODEL_NAMES), "length of retrieved metrics does not much number of models"
     return {MODEL_NAMES[i]: metrics for i, metrics in enumerate(model_metrics)}
 
+def get_dataframe(model_metrics: dict) -> pd.DataFrame:
+    # table summary of the results
+    pd.set_option('display.multi_sparse', False)
+    names = list(model_metrics.keys())
+    results = [model_metrics[name] for name in names]
+    debias = pd.Series(['Reweighting'
+                        if name.endswith('reweight')
+                        else ('Prejudice Remover' if name == 'prejudiceremover' else '')
+                        for name in names],
+                       name='Bias Mitigator')
+    clf = pd.Series(['Logistic Regression'
+                     if name.startswith('logreg')
+                     else ('Random Forest' if name.startswith('rf') else '')
+                     for name in names],
+                    name='Classifier')
+    results_df = pd.concat([pd.DataFrame(metrics) for metrics in results], axis=0).set_index([debias, clf])
+    return results_df
+
+def get_latex(df: pd.DataFrame) -> str:
+    df.rename(columns={'bal_acc': 'Bal acc', 'F1_score': 'F1 score', 'disp_imp': 'Disp imp',
+                               'avg_odds_diff': 'Avg odds diff', 'stat_par_diff': 'Stat par diff',
+                               'eq_opp_diff': 'Eq opp diff'}, inplace=True)
+    df.drop(columns=['FP Diff'], inplace=True)
+    df.reset_index(inplace=True)
+    df.fillna('', inplace=True)
+    df['Classifier'] = df['Classifier'].map({'Logistic Regression': 'Log. Reg.',
+                                                             'Random Forest': 'Rnd. For.'})
+    df.loc[df['Bias Mitigator'] == 'Prejudice Remover', 'Classifier'] = 'Log. Reg.'
+    cols = df.columns
+    lines = [' & '.join(cols) + ' \\\\', '\\hline', '\\hline']
+    for i, elll in enumerate(
+            [' & '.join(['{:.3f}'.format(ell) if type(ell) != str else ell for ell in row]) + ' \\\\' for row in
+             df[[el for el in cols]].values]):
+        if i in (2, 4):
+            lines.append('\\hline')
+        lines.append(elll)
+    return '\n'.join(lines)
+
+
 if __name__ == '__main__':
     Dataset1 = pd.read_csv(DATA_DIR + "Dataset14Days.csv", sep=';')
     patient_ids = Dataset1[['PseudoID']].values
     Dataset1.drop(columns=['PseudoID'], inplace=True)
     single_split_metrics = simple_split(Dataset1)
-    save_metrics(single_split_metrics)
+    print(get_latex(get_dataframe(single_split_metrics)))
 
 '''
     fold_metrics = cross_validation(Dataset1, groups, 10, 0.625)
