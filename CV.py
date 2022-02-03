@@ -17,8 +17,12 @@ from collections import defaultdict
 
 np.random.seed(1)
 DATA_DIR = '/media/bigdata/10. Stages/3. Afgerond/2020-08 Jesse Kuiper/'
-THRESHOLDS = np.linspace(0.1, 0.8, 50)
 MODEL_NAMES = ['logreg', 'rf', 'logregreweight', 'rfreweight', 'prejudiceremover']
+MODEL_THRESHOLDS = {'logreg': np.linspace(0.1, 0.9, 50),
+                    'rf': np.linspace(0.1, 0.8, 50),
+                    'logregreweight': np.linspace(0.01, 0.8, 50),
+                    'rfreweight': np.linspace(0.01, 0.8, 50),
+                    'prejudiceremover': np.linspace(0.01, 0.8, 50)}
 
 def is_favorable(DoseDiazepamPost):
     return DoseDiazepamPost==0
@@ -135,12 +139,16 @@ def train_val_test_model(model_name: str,
         for dataset in (dataset_train, dataset_val, dataset_test):
             dataset.features = pr_orig_scaler.fit_transform(dataset.features)
     trained_model = train_model(model_name, dataset_train, male_name, unprivileged_groups, privileged_groups)
-    validation_metrics = compute_metrics(trained_model, dataset_val, THRESHOLDS, unprivileged_groups, privileged_groups)
+    validation_metrics = compute_metrics(trained_model,
+                                         dataset_val,
+                                         MODEL_THRESHOLDS[model_name],
+                                         unprivileged_groups,
+                                         privileged_groups)
     best_threshold = get_best_threshold(validation_metrics)
     # Todo: retrain model on the entire dev set
     test_metrics = compute_metrics(trained_model,
                                    dataset_test,
-                                   np.array([THRESHOLDS[best_threshold]]),
+                                   np.array([MODEL_THRESHOLDS[model_name][best_threshold]]),
                                    unprivileged_groups,
                                    privileged_groups)
     return test_metrics
