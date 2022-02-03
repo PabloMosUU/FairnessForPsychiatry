@@ -118,7 +118,7 @@ def split_by_privilege(dataset: aif360.datasets.StandardDataset,
                   dataset.privileged_protected_attributes[protected_attribute_ix]]
     return unprivileged, privileged
 
-def save_metrics(fold_metrics: list) -> None:
+def save_metrics(fold_metrics: dict) -> None:
     print(fold_metrics)
 
 def train_val_test_model(model_name: str,
@@ -186,7 +186,7 @@ def cross_validation(data: pd.DataFrame, group_labels: list, n_splits: int, trai
         fold_metrics.append(model_metrics)
     return fold_metrics
 
-def simple_split(data: pd.DataFrame) -> list:
+def simple_split(data: pd.DataFrame) -> dict:
     DW = StandardDataset(
         data,
         "DoseDiazepamPost",
@@ -198,14 +198,15 @@ def simple_split(data: pd.DataFrame) -> list:
      dataset_val,
      dataset_test) = DW.split([0.5, 0.8], shuffle=True)
     model_metrics = train_all_models(MODEL_NAMES, dataset_train, dataset_val, dataset_test)
-    return model_metrics
+    assert len(model_metrics) == len(MODEL_NAMES), "length of retrieved metrics does not much number of models"
+    return {MODEL_NAMES[i]: metrics for i, metrics in enumerate(model_metrics)}
 
 if __name__ == '__main__':
     Dataset1 = pd.read_csv(DATA_DIR + "Dataset14Days.csv", sep=';')
     patient_ids = Dataset1[['PseudoID']].values
     Dataset1.drop(columns=['PseudoID'], inplace=True)
-    metrics = simple_split(Dataset1)
-    save_metrics(metrics)
+    single_split_metrics = simple_split(Dataset1)
+    save_metrics(single_split_metrics)
 
 '''
     fold_metrics = cross_validation(Dataset1, groups, 10, 0.625)
