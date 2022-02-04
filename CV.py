@@ -122,9 +122,6 @@ def split_by_privilege(dataset: aif360.datasets.StandardDataset,
                   dataset.privileged_protected_attributes[protected_attribute_ix]]
     return unprivileged, privileged
 
-def save_metrics(fold_metrics: dict) -> None:
-    print(fold_metrics)
-
 def train_val_test_model(model_name: str,
                          dataset_train: aif360.datasets.StandardDataset,
                          dataset_val: aif360.datasets.StandardDataset,
@@ -157,7 +154,7 @@ def train_val_test_model(model_name: str,
 def train_all_models(model_names: list,
                      dataset_train: aif360.datasets.StandardDataset,
                      dataset_val: aif360.datasets.StandardDataset,
-                     dataset_test: aif360.datasets.StandardDataset) -> list:
+                     dataset_test: aif360.datasets.StandardDataset) -> pd.DataFrame:
     sens_ind = 0  # TODO: magic variable
     protected_attribute_name = dataset_train.protected_attribute_names[sens_ind]
     unprivileged_groups, privileged_groups = split_by_privilege(dataset_train, sens_ind, protected_attribute_name)
@@ -171,15 +168,16 @@ def train_all_models(model_names: list,
                                             privileged_groups,
                                             protected_attribute_name)
         model_metrics.append(test_metrics)
-    return model_metrics
+    assert len(model_metrics) == len(MODEL_NAMES), "length of retrieved metrics does not much number of models"
+    return get_dataframe({MODEL_NAMES[i]: metrics for i, metrics in enumerate(model_metrics)})
+
 
 def cross_validation(data: pd.DataFrame, group_labels: list, n_splits: int, train_dev_frac: float) -> list:
     assert len(data) == len(group_labels), 'dataframe and groups must have the same length'
     gkf = GroupKFold(n_splits=n_splits)
     fold_metrics = []
     for dev, test in gkf.split(data, groups=group_labels):
-        df_dev = data.iloc[dev]
-        df_test = data.iloc[test]
+        df_dev, df_test = [data.iloc[el] for el in (dev, test)]
         groups_dev = group_labels[dev]
         df_train, df_val = train_test_split(df_dev,
                                             training_set_fraction=train_dev_frac,
@@ -191,11 +189,12 @@ def cross_validation(data: pd.DataFrame, group_labels: list, n_splits: int, trai
                                                                                  ['Geslacht'],
                                                                                  [['Man']])
                                                                  for el in (df_train, df_val, df_test, df_dev)]
-        model_metrics = train_all_models(MODEL_NAMES, dataset_train, dataset_val, dataset_test)
-        fold_metrics.append(model_metrics)
+        model_metrics_df = train_all_models(MODEL_NAMES, dataset_train, dataset_val, dataset_test)
+        model_metrics_df['fold'] = len(fold_metrics)
+        fold_metrics.append(model_metrics_df)
     return fold_metrics
 
-def simple_split(data: pd.DataFrame) -> dict:
+def simple_split(data: pd.DataFrame) -> pd.DataFrame:
     DW = StandardDataset(
         data,
         "DoseDiazepamPost",
@@ -206,9 +205,7 @@ def simple_split(data: pd.DataFrame) -> dict:
     (dataset_train,
      dataset_val,
      dataset_test) = DW.split([0.5, 0.8], shuffle=True)
-    model_metrics = train_all_models(MODEL_NAMES, dataset_train, dataset_val, dataset_test)
-    assert len(model_metrics) == len(MODEL_NAMES), "length of retrieved metrics does not much number of models"
-    return {MODEL_NAMES[i]: metrics for i, metrics in enumerate(model_metrics)}
+    return train_all_models(MODEL_NAMES, dataset_train, dataset_val, dataset_test)
 
 def get_dataframe(model_metrics: dict) -> pd.DataFrame:
     # table summary of the results
@@ -221,7 +218,7 @@ def get_dataframe(model_metrics: dict) -> pd.DataFrame:
                         for name in names],
                        name='Bias Mitigator')
     clf = pd.Series(['Logistic Regression'
-                     if name.startswith('logreg')
+                     if name.startswith('logreg') or name == 'prejudiceremover'
                      else ('Random Forest' if name.startswith('rf') else '')
                      for name in names],
                     name='Classifier')
@@ -253,10 +250,17 @@ if __name__ == '__main__':
     Dataset1 = pd.read_csv(DATA_DIR + "Dataset14Days.csv", sep=';')
     patient_ids = Dataset1[['PseudoID']].values
     Dataset1.drop(columns=['PseudoID'], inplace=True)
-    single_split_metrics = simple_split(Dataset1)
-    print(get_latex(get_dataframe(single_split_metrics)))
 
-'''
-    fold_metrics = cross_validation(Dataset1, groups, 10, 0.625)
-    save_metrics(fold_metrics)
-'''
+    """
+    single_split_metrics = simple_split(Dataset1)
+    out_df = single_split_metrics
+    out_df['fold'] = 0
+    out_df.to_csv('single_split.csv', sep=';')
+    print(get_latex(single_split_metrics))
+    """
+
+    fold_dfs = cross_validation(Dataset1, patient_ids, 10, 0.625)
+    for ix, fold_df in enumerate(fold_dfs):
+        fold_df.to_csv('CV/CV10/fold' + str(ix) + '.csv', sep=';')
+    full_df = pd.concat(fold_dfs)
+    full_df.to_csv('CV/CV10/cross_validation.csv', sep=';')
