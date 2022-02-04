@@ -136,8 +136,9 @@ def train_val_test_model(model_name: str,
     if model_name == 'prejudiceremover':
         pr_orig_scaler = StandardScaler()
         dataset_train, dataset_val, dataset_test = [el.copy() for el in (dataset_train, dataset_val, dataset_test)]
-        for dataset in (dataset_train, dataset_val, dataset_test):
-            dataset.features = pr_orig_scaler.fit_transform(dataset.features)
+        dataset_train.features = pr_orig_scaler.fit_transform(dataset_train.features)
+        dataset_val.features = pr_orig_scaler.transform(dataset_val.features)
+        dataset_test.features = pr_orig_scaler.transform(dataset_test.features)
     trained_model = train_model(model_name, dataset_train, male_name, unprivileged_groups, privileged_groups)
     validation_metrics = compute_metrics(trained_model,
                                          dataset_val,
