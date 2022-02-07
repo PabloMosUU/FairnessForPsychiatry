@@ -128,25 +128,31 @@ def train_val_test_model(model_name: str,
                          dataset_test: aif360.datasets.StandardDataset,
                          unprivileged_groups: list,
                          privileged_groups: list,
-                         male_name: str
+                         male_name: str,
+                         fixed_threshold=None
                          ) -> dict:
     if model_name == 'prejudiceremover':
         pr_orig_scaler = StandardScaler()
         dataset_train, dataset_val, dataset_test = [el.copy() for el in (dataset_train, dataset_val, dataset_test)]
         dataset_train.features = pr_orig_scaler.fit_transform(dataset_train.features)
-        dataset_val.features = pr_orig_scaler.transform(dataset_val.features)
+        if not fixed_threshold:
+            dataset_val.features = pr_orig_scaler.transform(dataset_val.features)
         dataset_test.features = pr_orig_scaler.transform(dataset_test.features)
     trained_model = train_model(model_name, dataset_train, male_name, unprivileged_groups, privileged_groups)
-    validation_metrics = compute_metrics(trained_model,
-                                         dataset_val,
-                                         MODEL_THRESHOLDS[model_name],
-                                         unprivileged_groups,
-                                         privileged_groups)
-    best_threshold = get_best_threshold(validation_metrics)
+    if fixed_threshold:
+        test_thresholds = np.array([fixed_threshold])
+    else:
+        validation_metrics = compute_metrics(trained_model,
+                                             dataset_val,
+                                             MODEL_THRESHOLDS[model_name],
+                                             unprivileged_groups,
+                                             privileged_groups)
+        best_threshold = get_best_threshold(validation_metrics)
+        test_thresholds = np.array([MODEL_THRESHOLDS[model_name][best_threshold]])
     # Todo: retrain model on the entire dev set
     test_metrics = compute_metrics(trained_model,
                                    dataset_test,
-                                   np.array([MODEL_THRESHOLDS[model_name][best_threshold]]),
+                                   test_thresholds,
                                    unprivileged_groups,
                                    privileged_groups)
     return test_metrics
@@ -154,7 +160,9 @@ def train_val_test_model(model_name: str,
 def train_all_models(model_names: list,
                      dataset_train: aif360.datasets.StandardDataset,
                      dataset_val: aif360.datasets.StandardDataset,
-                     dataset_test: aif360.datasets.StandardDataset) -> pd.DataFrame:
+                     dataset_test: aif360.datasets.StandardDataset,
+                     fixed_threshold=None
+                     ) -> pd.DataFrame:
     sens_ind = 0  # TODO: magic variable
     protected_attribute_name = dataset_train.protected_attribute_names[sens_ind]
     unprivileged_groups, privileged_groups = split_by_privilege(dataset_train, sens_ind, protected_attribute_name)
@@ -166,30 +174,40 @@ def train_all_models(model_names: list,
                                             dataset_test,
                                             unprivileged_groups,
                                             privileged_groups,
-                                            protected_attribute_name)
+                                            protected_attribute_name,
+                                            fixed_threshold)
         model_metrics.append(test_metrics)
     assert len(model_metrics) == len(MODEL_NAMES), "length of retrieved metrics does not much number of models"
     return get_dataframe({MODEL_NAMES[i]: metrics for i, metrics in enumerate(model_metrics)})
 
 
-def cross_validation(data: pd.DataFrame, group_labels: list, n_splits: int, train_dev_frac: float) -> list:
+def cross_validation(data: pd.DataFrame,
+                     group_labels: list,
+                     n_splits: int,
+                     train_dev_frac: float,
+                     fixed_threshold=None) -> list:
     assert len(data) == len(group_labels), 'dataframe and groups must have the same length'
+    assert not fixed_threshold or train_dev_frac == 1
     gkf = GroupKFold(n_splits=n_splits)
     fold_metrics = []
     for dev, test in gkf.split(data, groups=group_labels):
         df_dev, df_test = [data.iloc[el] for el in (dev, test)]
         groups_dev = group_labels[dev]
-        df_train, df_val = train_test_split(df_dev,
-                                            training_set_fraction=train_dev_frac,
-                                            group_labels=groups_dev,
-                                            shuffle=True)
+        if fixed_threshold:
+            df_train = df_dev.sample(frac=1, replace=False, random_state=42)
+            df_val = pd.DataFrame(columns=df_train.columns)
+        else:
+            df_train, df_val = train_test_split(df_dev,
+                                                training_set_fraction=train_dev_frac,
+                                                group_labels=groups_dev,
+                                                shuffle=True)
         dataset_train, dataset_val, dataset_test, dataset_dev = [StandardDataset(el,
                                                                                  'DoseDiazepamPost',
                                                                                  is_favorable,
                                                                                  ['Geslacht'],
                                                                                  [['Man']])
                                                                  for el in (df_train, df_val, df_test, df_dev)]
-        model_metrics_df = train_all_models(MODEL_NAMES, dataset_train, dataset_val, dataset_test)
+        model_metrics_df = train_all_models(MODEL_NAMES, dataset_train, dataset_val, dataset_test, fixed_threshold)
         model_metrics_df['fold'] = len(fold_metrics)
         fold_metrics.append(model_metrics_df)
     return fold_metrics
@@ -259,8 +277,8 @@ if __name__ == '__main__':
     print(get_latex(single_split_metrics))
     """
 
-    fold_dfs = cross_validation(Dataset1, patient_ids, 10, 0.625)
+    fold_dfs = cross_validation(Dataset1, patient_ids, 5, 1, fixed_threshold=0.5)
     for ix, fold_df in enumerate(fold_dfs):
-        fold_df.to_csv('CV/CV10/fold' + str(ix) + '.csv', sep=';')
+        fold_df.to_csv('CV/CV5_fixed_threshold/fold' + str(ix) + '.csv', sep=';')
     full_df = pd.concat(fold_dfs)
-    full_df.to_csv('CV/CV10/cross_validation.csv', sep=';')
+    full_df.to_csv('CV/CV5_fixed_threshold/cross_validation.csv', sep=';')
