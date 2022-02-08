@@ -14,6 +14,7 @@ from aif360.metrics import ClassificationMetric
 from aif360.algorithms.preprocessing import Reweighing
 from aif360.algorithms.inprocessing import PrejudiceRemover
 from collections import defaultdict
+import matplotlib.pyplot as plt
 
 np.random.seed(1)
 DATA_DIR = '/media/bigdata/10. Stages/3. Afgerond/2020-08 Jesse Kuiper/'
@@ -23,6 +24,8 @@ MODEL_THRESHOLDS = {'logreg': np.linspace(0.1, 0.9, 50),
                     'logregreweight': np.linspace(0.01, 0.8, 50),
                     'rfreweight': np.linspace(0.01, 0.8, 50),
                     'prejudiceremover': np.linspace(0.01, 0.8, 50)}
+OUTPUT_DIR = 'CV/CV5_retrain_repro/'
+N_SPLITS = 5
 
 def is_favorable(DoseDiazepamPost):
     return DoseDiazepamPost==0
@@ -169,6 +172,7 @@ def train_val_test_model(model_name: str,
                          unprivileged_groups: list,
                          privileged_groups: list,
                          protected_attribute: str,
+                         fold_number: int,
                          fixed_threshold=None,
                          dataset_dev=None
                          ) -> dict:
@@ -181,6 +185,7 @@ def train_val_test_model(model_name: str,
     :param unprivileged_groups: definition of unprivileged groups
     :param privileged_groups: definition of privileged groups
     :param protected_attribute: name of the protected attribute
+    :param fold_number: for the purpose of saving plots
     :param fixed_threshold: if set, do not perform validation to determine the best threshold
     :param dataset_dev: if set, use this dataset for retraining after validation
     :return: metrics on the test set
@@ -211,6 +216,7 @@ def train_val_test_model(model_name: str,
         test_thresholds = np.array([MODEL_THRESHOLDS[model_name][best_threshold]])
         if dataset_dev:
             trained_model = fit_model(trained_model, dataset_dev, model_name, unprivileged_groups, privileged_groups)
+        plot_fairness_metrics(MODEL_THRESHOLDS[model_name], validation_metrics, model_name, fold_number)
     test_metrics = compute_metrics(trained_model,
                                    dataset_test,
                                    test_thresholds,
@@ -222,6 +228,7 @@ def train_all_models(model_names: list,
                      dataset_train: aif360.datasets.StandardDataset,
                      dataset_val: aif360.datasets.StandardDataset,
                      dataset_test: aif360.datasets.StandardDataset,
+                     fold_number: int,
                      fixed_threshold=None,
                      dataset_dev=None
                      ) -> pd.DataFrame:
@@ -231,6 +238,7 @@ def train_all_models(model_names: list,
     :param dataset_train: training dataset
     :param dataset_val: validation dataset
     :param dataset_test: test dataset
+    :param fold_number: for the purpose of saving plots
     :param fixed_threshold: if set, do not perform validation to pick the best threshold
     :param dataset_dev: if set, use this dataset for retraining after validation
     :return: a dataframe with test metrics for all models
@@ -248,7 +256,8 @@ def train_all_models(model_names: list,
                                             unprivileged_groups,
                                             privileged_groups,
                                             protected_attribute_name,
-                                            fixed_threshold,
+                                            fold_number=fold_number,
+                                            fixed_threshold=fixed_threshold,
                                             dataset_dev=dataset_dev)
         model_metrics.append(test_metrics)
     assert len(model_metrics) == len(MODEL_NAMES), "length of retrieved metrics does not much number of models"
@@ -298,7 +307,8 @@ def cross_validation(data: pd.DataFrame,
                                             dataset_train,
                                             dataset_val,
                                             dataset_test,
-                                            fixed_threshold,
+                                            fold_number=len(fold_metrics),
+                                            fixed_threshold=fixed_threshold,
                                             dataset_dev=dataset_dev)
         model_metrics_df['fold'] = len(fold_metrics)
         fold_metrics.append(model_metrics_df)
@@ -315,7 +325,7 @@ def simple_split(data: pd.DataFrame) -> pd.DataFrame:
     (dataset_train,
      dataset_val,
      dataset_test) = DW.split([0.5, 0.8], shuffle=True)
-    return train_all_models(MODEL_NAMES, dataset_train, dataset_val, dataset_test)
+    return train_all_models(MODEL_NAMES, dataset_train, dataset_val, dataset_test, fold_number=0)
 
 def get_dataframe(model_metrics: dict) -> pd.DataFrame:
     # table summary of the results
@@ -336,16 +346,42 @@ def get_dataframe(model_metrics: dict) -> pd.DataFrame:
     return results_df
 
 def get_latex(df: pd.DataFrame) -> str:
-    df.rename(columns={'bal_acc': 'Bal acc', 'F1_score': 'F1 score', 'disp_imp': 'Disp imp',
-                               'avg_odds_diff': 'Avg odds diff', 'stat_par_diff': 'Stat par diff',
-                               'eq_opp_diff': 'Eq opp diff'}, inplace=True)
-    df.drop(columns=['FP Diff'], inplace=True)
+    df = df.copy()
+    disparate_impact_name = 'DI'
+    average_odds_difference_name = 'AOD'
+    statistical_parity_difference_name = 'SPD'
+    equal_opportunity_difference_name = 'EOD'
+    f1_score_name = 'F1'
+    balanced_accuracy_name = r'Acc$_{\rm bal}$'
+    df.rename(columns={'bal_acc': balanced_accuracy_name,
+                       'F1_score': f1_score_name,
+                       'disp_imp': disparate_impact_name,
+                       'avg_odds_diff': average_odds_difference_name,
+                       'stat_par_diff': statistical_parity_difference_name,
+                       'eq_opp_diff': equal_opportunity_difference_name},
+              inplace=True)
+    df.drop(columns=['FP Diff'], inplace=True, errors='ignore')
     df.reset_index(inplace=True)
     df.fillna('', inplace=True)
-    df['Classifier'] = df['Classifier'].map({'Logistic Regression': 'Log. Reg.',
-                                                             'Random Forest': 'Rnd. For.'})
-    df.loc[df['Bias Mitigator'] == 'Prejudice Remover', 'Classifier'] = 'Log. Reg.'
-    cols = df.columns
+    logistic_regression_name = 'LR'
+    random_forest_name = 'RF'
+    df['Classifier'] = df['Classifier'].map({'Logistic Regression': logistic_regression_name,
+                                             'Random Forest': random_forest_name})
+    df.loc[df['Bias Mitigator'] == 'Prejudice Remover', 'Classifier'] = logistic_regression_name
+    prejudice_remover_name = 'PR'
+    reweighting_name = 'RW'
+    df.loc[df['Bias Mitigator'] == 'Prejudice Remover', 'Bias Mitigator'] = prejudice_remover_name
+    df.loc[df['Bias Mitigator'] == 'Reweighing', 'Bias Mitigator'] = reweighting_name
+    df.loc[df['Bias Mitigator'] == 'Reweighting', 'Bias Mitigator'] = reweighting_name
+    df.rename(columns={'Classifier': 'Clf.', 'Bias Mitigator': 'Mit.'}, inplace=True)
+    cols = ['Classifier',
+            'Bias Mitigator',
+            balanced_accuracy_name,
+            f1_score_name,
+            disparate_impact_name,
+            average_odds_difference_name,
+            statistical_parity_difference_name,
+            equal_opportunity_difference_name]
     lines = [' & '.join(cols) + ' \\\\', '\\hline', '\\hline']
     for i, elll in enumerate(
             [' & '.join(['{:.3f}'.format(ell) if type(ell) != str else ell for ell in row]) + ' \\\\' for row in
@@ -356,15 +392,155 @@ def get_latex(df: pd.DataFrame) -> str:
     return '\n'.join(lines)
 
 
+def get_latex_performance(df: pd.DataFrame, delta=False) -> str:
+    df = df.copy()
+    f1_score_name = 'F1'
+    balanced_accuracy_name = r'Acc$_{\rm bal}$'
+    if delta:
+        f1_score_name, balanced_accuracy_name = [r'$\Delta$' + el for el in (f1_score_name, balanced_accuracy_name)]
+    df.rename(columns={'bal_acc': balanced_accuracy_name,
+                       'F1_score': f1_score_name},
+              inplace=True)
+    df.reset_index(inplace=True)
+    df.fillna('', inplace=True)
+    logistic_regression_name = 'LR'
+    random_forest_name = 'RF'
+    df['Classifier'] = df['Classifier'].map({'Logistic Regression': logistic_regression_name,
+                                             'Random Forest': random_forest_name})
+    df.loc[df['Bias Mitigator'] == 'Prejudice Remover', 'Classifier'] = logistic_regression_name
+    prejudice_remover_name = 'PR'
+    reweighting_name = 'RW'
+    df.loc[df['Bias Mitigator'] == 'Prejudice Remover', 'Bias Mitigator'] = prejudice_remover_name
+    df.loc[df['Bias Mitigator'] == 'Reweighing', 'Bias Mitigator'] = reweighting_name
+    df.loc[df['Bias Mitigator'] == 'Reweighting', 'Bias Mitigator'] = reweighting_name
+    classifier_name = 'Clf.'
+    mitigator_name = 'Mit.'
+    df.rename(columns={'Classifier': classifier_name, 'Bias Mitigator': mitigator_name}, inplace=True)
+    cols = [classifier_name, mitigator_name,
+            balanced_accuracy_name,
+            f1_score_name]
+    lines = [r"\begin{tabular}{|l|l|c|c|}", r"\hline",
+             r"\multicolumn{2}{|c|}{Model} & \multicolumn{2}{c|}{Performance} \\", r"\hline"]
+    lines += [' & '.join(cols) + ' \\\\', '\\hline', '\\hline']
+    for i, elll in enumerate(
+            [' & '.join(['{:.3f}'.format(ell) if type(ell) != str else format_with_uncertainty(ell, delta)
+                         for ell in row]) + ' \\\\' for row in
+             df[[el for el in cols]].values]):
+        if i in (2, 4):
+            lines.append('\\hline')
+        lines.append(elll)
+    lines += [r"\hline", r"\end{tabular}"]
+    return '\n'.join(lines)
+
+def format_with_uncertainty(value: str, delta: bool) -> str:
+    if delta and '+/-' in value:
+        mean, stdev = [float(el) for el in value.split('+/-')]
+        if abs(mean) > 2 * stdev:
+            value = r'\textbf{' + value + '}'
+    return value.replace('+/-', r'$\pm$')
+
+def get_latex_fairness(df: pd.DataFrame, delta=False) -> str:
+    df = df.copy()
+    disparate_impact_name = 'DI'
+    average_odds_difference_name = 'AOD'
+    statistical_parity_difference_name = 'SPD'
+    equal_opportunity_difference_name = 'EOD'
+    if delta:
+        disparate_impact_name, \
+            average_odds_difference_name, \
+            statistical_parity_difference_name, \
+            equal_opportunity_difference_name = [r'$\Delta$' + el for el in (disparate_impact_name,
+                                                                             average_odds_difference_name,
+                                                                             statistical_parity_difference_name,
+                                                                             equal_opportunity_difference_name)]
+    df.rename(columns={'disp_imp': disparate_impact_name,
+                       'avg_odds_diff': average_odds_difference_name,
+                       'stat_par_diff': statistical_parity_difference_name,
+                       'eq_opp_diff': equal_opportunity_difference_name},
+              inplace=True)
+    df.reset_index(inplace=True)
+    df.fillna('', inplace=True)
+    logistic_regression_name = 'LR'
+    random_forest_name = 'RF'
+    df['Classifier'] = df['Classifier'].map({'Logistic Regression': logistic_regression_name,
+                                             'Random Forest': random_forest_name})
+    df.loc[df['Bias Mitigator'] == 'Prejudice Remover', 'Classifier'] = logistic_regression_name
+    prejudice_remover_name = 'PR'
+    reweighting_name = 'RW'
+    df.loc[df['Bias Mitigator'] == 'Prejudice Remover', 'Bias Mitigator'] = prejudice_remover_name
+    df.loc[df['Bias Mitigator'] == 'Reweighing', 'Bias Mitigator'] = reweighting_name
+    df.loc[df['Bias Mitigator'] == 'Reweighting', 'Bias Mitigator'] = reweighting_name
+    classifier_name = 'Clf.'
+    mitigator_name = 'Mit.'
+    df.rename(columns={'Classifier': classifier_name, 'Bias Mitigator': mitigator_name}, inplace=True)
+    cols = [classifier_name,
+            mitigator_name,
+            disparate_impact_name,
+            average_odds_difference_name,
+            statistical_parity_difference_name,
+            equal_opportunity_difference_name]
+    lines = [r"\begin{tabular}{|l|l|c|c|c|c|}", r"\hline",
+             r"\multicolumn{2}{|c|}{Model} & \multicolumn{4}{c|}{Fairness} \\", r"\hline"]
+    lines += [' & '.join(cols) + ' \\\\', '\\hline', '\\hline']
+    for i, elll in enumerate(
+            [' & '.join(['{:.3f}'.format(ell) if type(ell) != str else format_with_uncertainty(ell, delta)
+                         for ell in row]) + ' \\\\' for row in
+             df[[el for el in cols]].values]):
+        if i in (2, 4):
+            lines.append('\\hline')
+        lines.append(elll)
+    lines += [r"\hline", r"\end{tabular}"]
+    return '\n'.join(lines)
+
+
+def plot(x, x_name, y_left, y_left_name, y_right, y_right_name, filename=None):
+    fig, ax1 = plt.subplots(figsize=(10, 7))
+    ax1.plot(x, y_left)
+    ax1.set_xlabel(x_name, fontsize=16, fontweight='bold')
+    ax1.set_ylabel(y_left_name, color='b', fontsize=16, fontweight='bold')
+    ax1.xaxis.set_tick_params(labelsize=14)
+    ax1.yaxis.set_tick_params(labelsize=14)
+    ax1.set_ylim(0.5, 1)
+
+    ax2 = ax1.twinx()
+    ax2.plot(x, y_right, color='r')
+    ax2.set_ylabel(y_right_name, color='r', fontsize=16, fontweight='bold')
+    if 'DI' in y_right_name:
+        ax2.set_ylim(0., 1)
+    else:
+        ax2.set_ylim(-0.25, 1)
+
+    best_ind = np.argmax(y_left)
+    ax2.axvline(np.array(x)[best_ind], color='k', linestyle=':')
+    ax2.yaxis.set_tick_params(labelsize=14)
+    ax2.grid(True)
+    if filename:
+        fig.savefig(filename)
+    plt.close('all')
+
+
+def plot_fairness_metrics(thresh_arr: np.ndarray, val_metrics: dict, model_name: str, fold: int) -> None:
+    disp_imp = np.array(val_metrics['disp_imp'])
+    disp_imp_err = 1 - np.minimum(disp_imp, 1 / disp_imp)
+    plot(thresh_arr, 'Classification Thresholds',
+         val_metrics['bal_acc'], 'Balanced Accuracy',
+         disp_imp_err, '1 - min(DI, 1/DI)',
+         filename=OUTPUT_DIR + f'{model_name}_DI_fold{fold}.eps')
+    plot(thresh_arr, 'Classification Thresholds',
+         val_metrics['bal_acc'], 'Balanced Accuracy',
+         val_metrics['avg_odds_diff'], 'avg. odds diff.',
+         filename=OUTPUT_DIR + f'{model_name}_AOD_fold{fold}.eps')
+
+
 if __name__ == '__main__':
     Dataset1 = pd.read_csv(DATA_DIR + "Dataset14Days.csv", sep=';')
     patient_ids = Dataset1[['PseudoID']].values
     Dataset1.drop(columns=['PseudoID'], inplace=True)
-    fold_dfs = cross_validation(Dataset1, patient_ids, n_splits=5, train_dev_frac=0.625, retrain=True)
+    fold_dfs = cross_validation(Dataset1, patient_ids, n_splits=N_SPLITS, train_dev_frac=0.625, retrain=True)
     for ix, fold_df in enumerate(fold_dfs):
-        fold_df.to_csv('CV/CV5_retrain/fold' + str(ix) + '.csv', sep=';')
+        fold_df.to_csv('CV/CV5_retrain_repro/fold' + str(ix) + '.csv', sep=';')
     full_df = pd.concat(fold_dfs)
-    full_df.to_csv('CV/CV5_retrain/cross_validation.csv', sep=';')
+    full_df.to_csv(OUTPUT_DIR + 'cross_validation.csv', sep=';')
 
     """
     single_split_metrics = simple_split(Dataset1)
