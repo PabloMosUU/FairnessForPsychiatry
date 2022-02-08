@@ -41,27 +41,58 @@ def train_model(name: str,
                 protected_attribute_name: str,
                 unprivileged_groups: list,
                 privileged_groups: list) -> sklearn.pipeline.Pipeline:
+    """
+    Initialize and train a model
+    :param name: the name of the model
+    :param dataset: training dataset
+    :param protected_attribute_name: name of the protected attribute
+    :param unprivileged_groups: definition of unprivileged groups
+    :param privileged_groups: definition of privileged groups
+    :return: the trained model
+    """
+    # Model initialization and fitting
+    if name == 'prejudiceremover':
+        model = PrejudiceRemover(sensitive_attr=protected_attribute_name, eta=25.0)
+    else:
+        if name.startswith('logreg'):
+            fitter = LogisticRegression(solver='liblinear', random_state=1)
+        elif name.startswith('rf'):
+            fitter = RandomForestClassifier(n_estimators=500, min_samples_leaf=25)
+        else:
+            raise ValueError('Unknown model', name)
+        model = make_pipeline(StandardScaler(), fitter)
+    return fit_model(model, dataset, name, unprivileged_groups, privileged_groups)
+
+
+def get_fit_parameters(name: str, dataset: StandardDataset) -> dict:
+    if name.startswith('logreg'):
+        return {'logisticregression__sample_weight': dataset.instance_weights}
+    elif name.startswith('rf'):
+        return {'randomforestclassifier__sample_weight': dataset.instance_weights}
+    else:
+        raise ValueError('Unknown model', name)
+
+
+def fit_model(model, dataset: StandardDataset, name: str, unprivileged_groups: list, privileged_groups: list):
+    """
+    Fit a model
+    :param model: the initialized model
+    :param dataset: training data
+    :param name: the name of the model
+    :param unprivileged_groups: definition of unprivileged groups
+    :param privileged_groups: definition of privileged groups
+    :return: a trained model
+    """
     # Dataset manipulations
     if name.endswith('reweight'):
         RW = Reweighing(unprivileged_groups=unprivileged_groups,
                         privileged_groups=privileged_groups)
         dataset_transf_train = RW.fit_transform(dataset)
         dataset = dataset_transf_train
-    # Model initialization and fitting
-    if name == 'prejudiceremover':
-        model = PrejudiceRemover(sensitive_attr=protected_attribute_name, eta=25.0)
+    if type(model) == PrejudiceRemover:
         return model.fit(dataset)
     else:
-        if name.startswith('logreg'):
-            fitter = LogisticRegression(solver='liblinear', random_state=1)
-            fit_params = {'logisticregression__sample_weight': dataset.instance_weights}
-        elif name.startswith('rf'):
-            fitter = RandomForestClassifier(n_estimators=500, min_samples_leaf=25)
-            fit_params = {'randomforestclassifier__sample_weight': dataset.instance_weights}
-        else:
-            raise ValueError('Unknown model', name)
-        model = make_pipeline(StandardScaler(),
-                              fitter)
+        fit_params = get_fit_parameters(name, dataset)
         return model.fit(dataset.features, dataset.labels.ravel(), **fit_params)
 
 def compute_metrics(model: sklearn.pipeline.Pipeline,
@@ -122,23 +153,52 @@ def split_by_privilege(dataset: aif360.datasets.StandardDataset,
                   dataset.privileged_protected_attributes[protected_attribute_ix]]
     return unprivileged, privileged
 
+
+def remove_prejudice(dataset: StandardDataset, fit: bool, scaler: StandardScaler) -> StandardDataset:
+    scaled_dataset = dataset.copy()
+    if fit:
+        scaled_dataset.features = scaler.fit_transform(scaled_dataset.features)
+    else:
+        scaled_dataset.features = scaler.transform(scaled_dataset.features)
+    return scaled_dataset
+
 def train_val_test_model(model_name: str,
                          dataset_train: aif360.datasets.StandardDataset,
                          dataset_val: aif360.datasets.StandardDataset,
                          dataset_test: aif360.datasets.StandardDataset,
                          unprivileged_groups: list,
                          privileged_groups: list,
-                         male_name: str,
-                         fixed_threshold=None
+                         protected_attribute: str,
+                         fixed_threshold=None,
+                         dataset_dev=None
                          ) -> dict:
+    """
+    Train, validate and test a single model
+    :param model_name: the name of the model
+    :param dataset_train: training dataset
+    :param dataset_val: validation dataset
+    :param dataset_test: test dataset
+    :param unprivileged_groups: definition of unprivileged groups
+    :param privileged_groups: definition of privileged groups
+    :param protected_attribute: name of the protected attribute
+    :param fixed_threshold: if set, do not perform validation to determine the best threshold
+    :param dataset_dev: if set, use this dataset for retraining after validation
+    :return: metrics on the test set
+    """
+    assert not fixed_threshold or not dataset_dev, 'Cannot set a fixed threshold and also retrain'
     if model_name == 'prejudiceremover':
         pr_orig_scaler = StandardScaler()
-        dataset_train, dataset_val, dataset_test = [el.copy() for el in (dataset_train, dataset_val, dataset_test)]
-        dataset_train.features = pr_orig_scaler.fit_transform(dataset_train.features)
+        dataset_train = remove_prejudice(dataset_train, True, pr_orig_scaler)
         if not fixed_threshold:
-            dataset_val.features = pr_orig_scaler.transform(dataset_val.features)
-        dataset_test.features = pr_orig_scaler.transform(dataset_test.features)
-    trained_model = train_model(model_name, dataset_train, male_name, unprivileged_groups, privileged_groups)
+            dataset_val = remove_prejudice(dataset_val, False, pr_orig_scaler)
+        dataset_test = remove_prejudice(dataset_test, False, pr_orig_scaler)
+        if dataset_dev:
+            dataset_dev = remove_prejudice(dataset_dev, True, pr_orig_scaler)
+    trained_model = train_model(model_name,
+                                dataset_train,
+                                protected_attribute,
+                                unprivileged_groups,
+                                privileged_groups)
     if fixed_threshold:
         test_thresholds = np.array([fixed_threshold])
     else:
@@ -149,7 +209,8 @@ def train_val_test_model(model_name: str,
                                              privileged_groups)
         best_threshold = get_best_threshold(validation_metrics)
         test_thresholds = np.array([MODEL_THRESHOLDS[model_name][best_threshold]])
-    # Todo: retrain model on the entire dev set
+        if dataset_dev:
+            trained_model = fit_model(trained_model, dataset_dev, model_name, unprivileged_groups, privileged_groups)
     test_metrics = compute_metrics(trained_model,
                                    dataset_test,
                                    test_thresholds,
@@ -161,9 +222,21 @@ def train_all_models(model_names: list,
                      dataset_train: aif360.datasets.StandardDataset,
                      dataset_val: aif360.datasets.StandardDataset,
                      dataset_test: aif360.datasets.StandardDataset,
-                     fixed_threshold=None
+                     fixed_threshold=None,
+                     dataset_dev=None
                      ) -> pd.DataFrame:
-    sens_ind = 0  # TODO: magic variable
+    """
+    Train all models given by model_names
+    :param model_names: the list of models to be trained
+    :param dataset_train: training dataset
+    :param dataset_val: validation dataset
+    :param dataset_test: test dataset
+    :param fixed_threshold: if set, do not perform validation to pick the best threshold
+    :param dataset_dev: if set, use this dataset for retraining after validation
+    :return: a dataframe with test metrics for all models
+    """
+    assert not fixed_threshold or not dataset_dev, 'Cannot fix threshold and also retrain'
+    sens_ind = 0  # TODO: magic variable (here and elsewhere)
     protected_attribute_name = dataset_train.protected_attribute_names[sens_ind]
     unprivileged_groups, privileged_groups = split_by_privilege(dataset_train, sens_ind, protected_attribute_name)
     model_metrics = []
@@ -175,7 +248,8 @@ def train_all_models(model_names: list,
                                             unprivileged_groups,
                                             privileged_groups,
                                             protected_attribute_name,
-                                            fixed_threshold)
+                                            fixed_threshold,
+                                            dataset_dev=dataset_dev)
         model_metrics.append(test_metrics)
     assert len(model_metrics) == len(MODEL_NAMES), "length of retrieved metrics does not much number of models"
     return get_dataframe({MODEL_NAMES[i]: metrics for i, metrics in enumerate(model_metrics)})
@@ -185,9 +259,22 @@ def cross_validation(data: pd.DataFrame,
                      group_labels: list,
                      n_splits: int,
                      train_dev_frac: float,
-                     fixed_threshold=None) -> list:
+                     fixed_threshold=None,
+                     retrain=False) -> list:
+    """
+    Perform cross-validation on the data to determine performance and bias metrics
+    :param data: the entire dataset
+    :param group_labels: patient IDs corresponding to the rows of the data
+    :param n_splits: how many folds of cross-validation to do
+    :param train_dev_frac: what fraction of the development set to use for training
+    :param fixed_threshold: if set, no validation is done on the development set to find the optimal threshold
+    :param retrain: if True, retrain model on entire dev set after validation (requires no fixed_threshold)
+    :return: a list of metrics corresponding to each fold
+    """
     assert len(data) == len(group_labels), 'dataframe and groups must have the same length'
-    assert not fixed_threshold or train_dev_frac == 1
+    assert 1 >= train_dev_frac > 0, 'Invalid train_dev_frac; must be >0 and <=1'
+    assert (train_dev_frac < 1 and not fixed_threshold) or (fixed_threshold and not retrain and train_dev_frac == 1), \
+        "Either validate to pick threshold or fixed threshold and do not retrain"
     gkf = GroupKFold(n_splits=n_splits)
     fold_metrics = []
     for dev, test in gkf.split(data, groups=group_labels):
@@ -207,7 +294,12 @@ def cross_validation(data: pd.DataFrame,
                                                                                  ['Geslacht'],
                                                                                  [['Man']])
                                                                  for el in (df_train, df_val, df_test, df_dev)]
-        model_metrics_df = train_all_models(MODEL_NAMES, dataset_train, dataset_val, dataset_test, fixed_threshold)
+        model_metrics_df = train_all_models(MODEL_NAMES,
+                                            dataset_train,
+                                            dataset_val,
+                                            dataset_test,
+                                            fixed_threshold,
+                                            dataset_dev=dataset_dev)
         model_metrics_df['fold'] = len(fold_metrics)
         fold_metrics.append(model_metrics_df)
     return fold_metrics
@@ -268,6 +360,11 @@ if __name__ == '__main__':
     Dataset1 = pd.read_csv(DATA_DIR + "Dataset14Days.csv", sep=';')
     patient_ids = Dataset1[['PseudoID']].values
     Dataset1.drop(columns=['PseudoID'], inplace=True)
+    fold_dfs = cross_validation(Dataset1, patient_ids, n_splits=5, train_dev_frac=0.625, retrain=True)
+    for ix, fold_df in enumerate(fold_dfs):
+        fold_df.to_csv('CV/CV5_retrain/fold' + str(ix) + '.csv', sep=';')
+    full_df = pd.concat(fold_dfs)
+    full_df.to_csv('CV/CV5_retrain/cross_validation.csv', sep=';')
 
     """
     single_split_metrics = simple_split(Dataset1)
@@ -276,9 +373,3 @@ if __name__ == '__main__':
     out_df.to_csv('single_split.csv', sep=';')
     print(get_latex(single_split_metrics))
     """
-
-    fold_dfs = cross_validation(Dataset1, patient_ids, 5, 1, fixed_threshold=0.5)
-    for ix, fold_df in enumerate(fold_dfs):
-        fold_df.to_csv('CV/CV5_fixed_threshold/fold' + str(ix) + '.csv', sep=';')
-    full_df = pd.concat(fold_dfs)
-    full_df.to_csv('CV/CV5_fixed_threshold/cross_validation.csv', sep=';')
