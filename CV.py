@@ -15,6 +15,7 @@ from aif360.algorithms.preprocessing import Reweighing
 from aif360.algorithms.inprocessing import PrejudiceRemover
 from collections import defaultdict
 import matplotlib.pyplot as plt
+import random
 
 np.random.seed(1)
 DATA_DIR = '/media/bigdata/10. Stages/3. Afgerond/2020-08 Jesse Kuiper/'
@@ -24,8 +25,10 @@ MODEL_THRESHOLDS = {'logreg': np.linspace(0.1, 0.9, 50),
                     'logregreweight': np.linspace(0.01, 0.8, 50),
                     'rfreweight': np.linspace(0.01, 0.8, 50),
                     'prejudiceremover': np.linspace(0.01, 0.8, 50)}
-OUTPUT_DIR = 'CV/CV5_retrain_repro/'
+OUTPUT_DIR = 'CV/CV5_no_protected_attribute/'
 N_SPLITS = 5
+REMOVE_PROTECTED_ATTRIBUTE = True
+PROTECTED_ATTRIBUTE_NAME = 'Geslacht'
 
 def is_favorable(DoseDiazepamPost):
     return DoseDiazepamPost==0
@@ -297,10 +300,13 @@ def cross_validation(data: pd.DataFrame,
                                                 training_set_fraction=train_dev_frac,
                                                 group_labels=groups_dev,
                                                 shuffle=True)
+        if REMOVE_PROTECTED_ATTRIBUTE:
+            df_train = randomize_protected_attribute(df_train, PROTECTED_ATTRIBUTE_NAME)
+            df_dev = randomize_protected_attribute(df_dev, PROTECTED_ATTRIBUTE_NAME)
         dataset_train, dataset_val, dataset_test, dataset_dev = [StandardDataset(el,
                                                                                  'DoseDiazepamPost',
                                                                                  is_favorable,
-                                                                                 ['Geslacht'],
+                                                                                 [PROTECTED_ATTRIBUTE_NAME],
                                                                                  [['Man']])
                                                                  for el in (df_train, df_val, df_test, df_dev)]
         model_metrics_df = train_all_models(MODEL_NAMES,
@@ -319,7 +325,7 @@ def simple_split(data: pd.DataFrame) -> pd.DataFrame:
         data,
         "DoseDiazepamPost",
         is_favorable,
-        ["Geslacht"],
+        [PROTECTED_ATTRIBUTE_NAME],
         [["Man"]])
     # noinspection PyTypeChecker
     (dataset_train,
@@ -532,13 +538,27 @@ def plot_fairness_metrics(thresh_arr: np.ndarray, val_metrics: dict, model_name:
          filename=OUTPUT_DIR + f'{model_name}_AOD_fold{fold}.eps')
 
 
+def randomize_protected_attribute(df: pd.DataFrame, protected_attribute: str) -> pd.DataFrame:
+    """
+    Randomize the value of the protected attribute
+    :param df: a Pandas dataframe containing the protected attribute
+    :param protected_attribute: the name of the column containing the protected attribute
+    :return: the same dataframe, with the values of the protected attribute replaced by random values
+    """
+    df = df.copy()
+    protected_attribute_values = df[protected_attribute].tolist()
+    random.shuffle(protected_attribute_values)
+    df[protected_attribute] = protected_attribute_values
+    return df
+
 if __name__ == '__main__':
     Dataset1 = pd.read_csv(DATA_DIR + "Dataset14Days.csv", sep=';')
     patient_ids = Dataset1[['PseudoID']].values
     Dataset1.drop(columns=['PseudoID'], inplace=True)
+
     fold_dfs = cross_validation(Dataset1, patient_ids, n_splits=N_SPLITS, train_dev_frac=0.625, retrain=True)
     for ix, fold_df in enumerate(fold_dfs):
-        fold_df.to_csv('CV/CV5_retrain_repro/fold' + str(ix) + '.csv', sep=';')
+        fold_df.to_csv(OUTPUT_DIR + 'fold' + str(ix) + '.csv', sep=';')
     full_df = pd.concat(fold_dfs)
     full_df.to_csv(OUTPUT_DIR + 'cross_validation.csv', sep=';')
 
