@@ -1,9 +1,8 @@
-# This script generates the dataset(s) to be used for classification, starting from the datasets that contain the basic information about patients
+# This script generates the dataset(s) to be used for classification,
+# starting from the datasets that contain the basic information about patients
 
 import numpy as np
 import pandas as pd
-import datetime
-from sklearn import preprocessing
 
 
 # data
@@ -19,14 +18,14 @@ admission_columns = ["OpnameID", "PseudoID","AfdelingOmschrijving", "Opnamedatum
 
 administering_columns = ["PseudoID", "VoorschriftID", "ATC_code_omschr", "Medicijnnaam_ingevuld","Dosis", 
                          "Eenheid", "ToedienDatum", "ToedienTijd", "Toegediend", "DosisVerbruikt", 
-                         "DosisOrigineel", "ToedieningIsOpgeschort", "NietToegediend"  ]
+                         "DosisOrigineel", "ToedieningIsOpgeschort", "NietToegediend"]
 
-dbc_columns = [ "PseudoID", "dbcnummer","Startdatum", "Einddatum" ,"hoofddiagnose_groep", "zorgvraagzwaarte", 
-               "MeervoudigeProblematiekInd", "persoonlijkheidsstoornis", "Opname", "DiagnoseDatum" ]
+dbc_columns = ["PseudoID", "dbcnummer","Startdatum", "Einddatum","hoofddiagnose_groep", "zorgvraagzwaarte",
+               "MeervoudigeProblematiekInd", "persoonlijkheidsstoornis", "Opname", "DiagnoseDatum"]
 
 violent_columns = ["PseudoID", "hantering_datum", "begin_incident"]
 
-patient_columns = ["PseudoID", "Leeftijd_startdatum_dossier" ]
+patient_columns = ["PseudoID", "Leeftijd_startdatum_dossier"]
 
 def drop_by_pseudo_id(df: pd.DataFrame, pseudo_ids: list) -> pd.DataFrame:
     return df[df['PseudoID'].apply(lambda x: x not in pseudo_ids)].reset_index()
@@ -43,7 +42,7 @@ admission = pd.read_csv(DATA_DIR + "werkbestanden-opnames/latest/werkbestand_opn
 
 # load administered
 administering = pd.read_csv(DATA_DIR + "werkbestanden-medicatie/latest/werkbestand_medicatie_toediening.csv", sep=';',
-                        decimal=',', usecols=administering_columns)
+                            decimal=',', usecols=administering_columns)
 
 
 # load dbc
@@ -55,8 +54,8 @@ violent = pd.read_csv(DATA_DIR + "werkbestanden-map/latest/werkbestand_map.csv",
 
 
 #load patient or patient uniek
-patient = pd.read_csv(DATA_DIR + "werkbestanden-patient/latest/werkbestand_patient_uniek.csv", sep=';', 
-                  usecols=patient_columns)
+patient = pd.read_csv(DATA_DIR + "werkbestanden-patient/latest/werkbestand_patient_uniek.csv", sep=';',
+                      usecols=patient_columns)
 
 
 # load conversion factors from various tranquilizers to diazepam
@@ -90,7 +89,10 @@ admission["DaysP"] = np.where(admission["Duur"]>= 3, 3, admission["Duur"])
 admission["DateTimeCheckF"] = admission["OpnamedatumTijd"] + pd.to_timedelta(admission["DaysF"], unit='d')
 admission["DateTimeCheckP"] = admission["OpnamedatumTijd"] + pd.to_timedelta(admission["DaysP"], unit='d')
 
-afd = ["Klin. Affectieve & Psychotische stoorn.","Klinische Acuut & Intensieve Zorg","Klin.Acuut & Intensieve. Zorg Jeugd", "Klin Diagn & Vroege Psychose"]
+afd = ["Klin. Affectieve & Psychotische stoorn.",
+       "Klinische Acuut & Intensieve Zorg",
+       "Klin.Acuut & Intensieve. Zorg Jeugd",
+       "Klin Diagn & Vroege Psychose"]
 
 # AfdelingOmschrijving
 adm_afd = pd.get_dummies(admission["AfdelingOmschrijving"])
@@ -113,9 +115,12 @@ print('Only admissions lasting 14 or more days:', len(admission2))
 
 # ### Diagnoses
 
-# change NaN in hoofddiagnose_groep to "Lege hoofddiagnose" as this is already a variable in the table with the same meaning
+# change NaN in hoofddiagnose_groep to "Lege hoofddiagnose"
+# as this is already a variable in the table with the same meaning
 dbc["hoofddiagnose_groep"] = dbc["hoofddiagnose_groep"].replace(np.nan, "Lege hoofddiagnose", regex=True)
-dbc["hoofddiagnose_groep"] = dbc["hoofddiagnose_groep"].str.replace("Bijkomende codes/geen diagnose","Lege hoofddiagnose")
+dbc["hoofddiagnose_groep"] = dbc["hoofddiagnose_groep"].str.replace(
+    "Bijkomende codes/geen diagnose",
+    "Lege hoofddiagnose")
 
 
 # create a diagnose date
@@ -240,17 +245,21 @@ map_adm3 = adm_pat3.merge(violent[["PseudoID", "IncidentID", "hantering_datumTij
 # whole dataset
 opname_ids, incidents_during_admission, incidents_before_admission = [], [], []
 for opname_id, grp in map_adm1.groupby("OpnameID"):
-    # opname_id -> single OpnameID from adm_map table                                                                                                                                                      
-    # grp -> a dataframe containing only the rows that have OpnameID == opname_id                                                                                                                          
+    # opname_id -> single OpnameID from adm_map table
+    # grp -> a dataframe containing only the rows that have OpnameID == opname_id
     opname_ids.append(opname_id)
     if len(grp[grp["IncidentID"].notnull()]) == 0:
-        # No incidents                                                                                                                                                                                     
+        # No incidents
         incidents_during_admission.append(0)
         incidents_before_admission.append(0)
     else:
-        # At least one incident                                                                                                                                                                                                                                                                                                                                    
-        n_during = len(grp[grp.apply(lambda row: row.OntslagdatumTijd >= row.hantering_datumTijd >= row.OpnamedatumTijd, 1)])
-        n_before = len(grp[grp.apply(lambda row: row.hantering_datumTijd < row.OpnamedatumTijd, 1)])
+        # At least one incident
+        n_during = len(grp[grp.apply(
+            lambda row: row.OntslagdatumTijd >= row.hantering_datumTijd >= row.OpnamedatumTijd,
+            1)])
+        n_before = len(grp[grp.apply(
+            lambda row: row.hantering_datumTijd < row.OpnamedatumTijd,
+            1)])
         incidents_during_admission.append(n_during)
         incidents_before_admission.append(n_before)
 
@@ -269,16 +278,17 @@ assert len(adm_map1) == len(adm_pat1)
 #  dataset2 
 opname_ids, incidents_during_admission, incidents_before_admission = [], [], []
 for opname_id, grp in map_adm2.groupby("OpnameID"):
-    # opname_id -> single OpnameID from adm_map table                                                                                                                                                      
-    # grp -> a dataframe containing only the rows that have OpnameID == opname_id                                                                                                                          
+    # opname_id -> single OpnameID from adm_map table
+    # grp -> a dataframe containing only the rows that have OpnameID == opname_id
     opname_ids.append(opname_id)
     if len(grp[grp["IncidentID"].notnull()]) == 0:
-        # No incidents                                                                                                                                                                                     
+        # No incidents
         incidents_during_admission.append(0)
         incidents_before_admission.append(0)
     else:
-        # At least one incident                                                                                                                                                                                                                                                                                                                                    
-        n_during = len(grp[grp.apply(lambda row: row.DateTimeCheckF >= row.hantering_datumTijd >= row.OpnamedatumTijd, 1)])
+        # At least one incident
+        n_during = len(grp[grp.apply(lambda row: row.DateTimeCheckF >= row.hantering_datumTijd >= row.OpnamedatumTijd,
+                                     1)])
         n_before = len(grp[grp.apply(
             lambda row: row.hantering_datumTijd < row.OpnamedatumTijd, 1
         )])
@@ -300,16 +310,17 @@ assert len(adm_map2) == len(adm_pat2)
 #  dataset3 
 opname_ids, incidents_during_admission, incidents_before_admission = [], [], []
 for opname_id, grp in map_adm3.groupby("OpnameID"):
-    # opname_id -> single OpnameID from adm_map table                                                                                                                                                      
-    # grp -> a dataframe containing only the rows that have OpnameID == opname_id                                                                                                                          
+    # opname_id -> single OpnameID from adm_map table
+    # grp -> a dataframe containing only the rows that have OpnameID == opname_id
     opname_ids.append(opname_id)
     if len(grp[grp["IncidentID"].notnull()]) == 0:
-        # No incidents                                                                                                                                                                                     
+        # No incidents
         incidents_during_admission.append(0)
         incidents_before_admission.append(0)
     else:
-        # At least one incident                                                                                                                                                                                                                                                                                                                                    
-        n_during = len(grp[grp.apply(lambda row: row.DateTimeCheckP >= row.hantering_datumTijd >= row.OpnamedatumTijd, 1)])
+        # At least one incident
+        n_during = len(grp[grp.apply(lambda row: row.DateTimeCheckP >= row.hantering_datumTijd >= row.OpnamedatumTijd,
+                                     1)])
         n_before = len(grp[grp.apply(lambda row: row.hantering_datumTijd < row.OpnamedatumTijd, 1)])
         incidents_during_admission.append(n_during)
         incidents_before_admission.append(n_before)
@@ -432,31 +443,31 @@ adm_dbc3 = get_adm_dbc(3,adm_map3)
 # create past and future tranq prescriptions
 
 var_pat = ["PseudoID",
-        "Spoed",
-        "EersteOpname",
-        "Geslacht",
-        "Leeftijd_opname",
-        "Duur",
-        "Leeftijd_startdatum_dossier",
-        "incidents_during_admission",
-        "incidents_before_admission",
-        "MeervoudigeProblematiekInd",
-        "persoonlijkheidsstoornis",
-        "ZorgvraagzwaarteMin",
-        "ZorgvraagzwaarteMax",
-        "DoseDiazepam",
-        "DoseDiazepamPre",
-        "DoseDiazepamPost",   
-]
+            "Spoed",
+            "EersteOpname",
+            "Geslacht",
+            "Leeftijd_opname",
+            "Duur",
+            "Leeftijd_startdatum_dossier",
+            "incidents_during_admission",
+            "incidents_before_admission",
+            "MeervoudigeProblematiekInd",
+            "persoonlijkheidsstoornis",
+            "ZorgvraagzwaarteMin",
+            "ZorgvraagzwaarteMax",
+            "DoseDiazepam",
+            "DoseDiazepamPre",
+            "DoseDiazepamPost",
+           ]
 
 UsefulVariables = var_pat + afd + hoofddiagnoses
 
 # left join on PseudoID
 # has no end date restriction for the post prescriptions
-def get_adm_dose(dataset: int, frame ):
+def get_adm_dose(dataset: int, frame):
     dataset_end_date_column = {1: 'OntslagdatumTijd', 2: 'DateTimeCheckF', 3: 'DateTimeCheckP'}
     end_date = dataset_end_date_column[dataset]
-    adm_adm1 = frame.merge(administering[["PseudoID", "ToedienDatumTijd", "DoseDiazepam" ]], how="left", 
+    adm_adm1 = frame.merge(administering[["PseudoID", "ToedienDatumTijd", "DoseDiazepam"]], how="left",
                            on="PseudoID")  
 
     # remove rows where the ToedienDatumTijd is outside of the OpnamedatumTijd and OntslagdatumTijd
@@ -464,13 +475,15 @@ def get_adm_dose(dataset: int, frame ):
     adm_adm1 = adm_adm1[adm_adm1["ToedienDatumTijd"] <= adm_adm1["OntslagdatumTijd"]]
 
     # create past and future prescriptions
-    adm_adm1["Past"] = adm_adm1.apply(lambda row: int(row.ToedienDatumTijd <= row[end_date] and                                                       row.ToedienDatumTijd >= row.OpnamedatumTijd), 1)
+    adm_adm1["Past"] = adm_adm1.apply(
+        lambda row: int(row[end_date] >= row.ToedienDatumTijd >= row.OpnamedatumTijd),
+        1)
 
     # diazepam prescribed in the past
-    adm_adm1["DoseDiazepamPre"] = np.where(adm_adm1["Past"]== 1, adm_adm1["DoseDiazepam"], 0 )
+    adm_adm1["DoseDiazepamPre"] = np.where(adm_adm1["Past"]== 1, adm_adm1["DoseDiazepam"], 0)
 
     # diazepam prescribed in the future
-    adm_adm1["DoseDiazepamPost"] = np.where(adm_adm1["Past"]== 0, adm_adm1["DoseDiazepam"], 0 )
+    adm_adm1["DoseDiazepamPost"] = np.where(adm_adm1["Past"]== 0, adm_adm1["DoseDiazepam"], 0)
     
     # groupby
     groupby_columns = ["OpnameID", "OpnamedatumTijd", "OntslagdatumTijd"]
@@ -491,24 +504,24 @@ def get_adm_dose(dataset: int, frame ):
     Dataset.drop(columns=['sum', 'diff', 'avg', 'fracdiff'], inplace=True)
 
     # true dataset 
-    DatasetWhole = Dataset[UsefulVariables]
+    dff = Dataset[UsefulVariables]
     
-    assert np.sum(DatasetWhole.isnull().sum().values) == 0
-    return DatasetWhole
+    assert np.sum(dff.isnull().sum().values) == 0
+    return dff
 
 
-DatasetWhole = get_adm_dose(1 , adm_dbc1)
+DatasetWhole = get_adm_dose(1, adm_dbc1)
 
 del DatasetWhole["DoseDiazepamPost"]
 del DatasetWhole["DoseDiazepamPre"]
 
 
-Dataset14Days = get_adm_dose(2 , adm_dbc2)
+Dataset14Days = get_adm_dose(2, adm_dbc2)
 
 del Dataset14Days["DoseDiazepam"]
 
 
-Dataset3Days = get_adm_dose(3 , adm_dbc3)
+Dataset3Days = get_adm_dose(3, adm_dbc3)
 
 del Dataset3Days["DoseDiazepam"]
 
